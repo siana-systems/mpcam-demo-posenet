@@ -1,0 +1,30 @@
+{
+    "deploy.reloaded": {
+        "packages": [
+            {
+                "name": "MPCam Test",
+                "files": [
+                    "**"
+                ],
+                "button": {
+                    "text": "Deploy to MPCam",
+                    "tooltip": "Click here to deploy to mpcam.local...",
+                    "targets": [ "MPCam" ]
+                }
+            }
+        ],
+        
+        "targets": [
+            {
+                "name": "MPCam",
+                "type": "sftp",
+                "host": "mpcam.local",
+                "port": 22,
+                "user": "root",
+                "password": " ",
+                "dir": "/data/posenet"
+            }
+        ]
+    },
+    "python.pythonPath": "/home/sylvain/.virtualenvs/mpcam/bin/python"
+}
