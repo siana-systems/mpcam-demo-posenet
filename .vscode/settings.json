@@ -22,9 +22,8 @@
                 "port": 22,
                 "user": "root",
                 "password": " ",
-                "dir": "/data/posenet"
+                "dir": "/data/coral_posenet"
             }
         ]
-    },
-    "python.pythonPath": "/home/sylvain/.virtualenvs/mpcam/bin/python"
+    }
 }

@@ -5,21 +5,16 @@
 import time
 import platform
 from datetime import datetime
-from io import StringIO
 
 import cv2
 import numpy as np
-from PIL import Image
 
-#from pympcam.coralManager import CoralManager
-
-from pose_engine import PoseEngine
+from pympcam.coralManager import CoralManager
 from imutils.video import VideoStream, ImageOutput, FPS
 
-from pkg_resources import parse_version
-from edgetpu import __version__ as edgetpu_version
-assert parse_version(edgetpu_version) >= parse_version('2.11.1'), \
-        'This demo requires Edge TPU version >= 2.11.1'
+from pose_engine import PoseEngine
+
+verbose = False
 
 # supported pose edges
 EDGES = (
@@ -52,7 +47,7 @@ def draw_pose(poses, src):
          scr:  input image
     '''
     threshold = 0.2
-    src_size = (480, 360)
+    src_size = (640, 480)
     box_x, box_y, box_w, box_h = 5, 0, 470, 353 #inference_box
 
     scale_x, scale_y = src_size[0] / box_w, src_size[1] / box_h
@@ -86,7 +81,7 @@ def draw_metrics(src, fps, model_msec=0):
           fps: the Frame-per-second value   
           model_msec: the model compute duration in msec
     '''
-    canvas = np.zeros((20, 480, 3), np.uint8) + 255
+    canvas = np.zeros((20, 640, 3), np.uint8) + 255
 
     canvas = cv2.putText(canvas, 
                         'fps: {:.2f}, model: {:.0f} ms'.format(
@@ -111,9 +106,11 @@ def process_frame(img, model):
     '''
     
     #img = cv2.flip(img, 1)
-    img = cv2.resize(img, (480, 360))
+    #img = cv2.resize(img, (480, 360))
 
     poses, _ = model.DetectPosesInImage(img)
+    if verbose: print("!! POSES:\n{}".format(poses))
+
     draw_pose(poses, img)
     return img
 
@@ -122,13 +119,15 @@ def main():
     print("\n** MPCam: Coral PoseNet demo **\n")
     print(">> system info:")
     print("\tpython {}".format(platform.python_version()))
-    print("\tedgetpu {}".format(edgetpu_version))
     print("\topencv {}".format(cv2.__version__))
     
     print(">> turning on coral...")
-    #coral = CoralManager()
-    #coral.turnOn()
+    coral = CoralManager()
+    coral.turnOn()
     time.sleep(2)
+
+    print(">> loading model...")
+    model = PoseEngine('models/mobilenet/posenet_mobilenet_v1_075_353_481_quant_decoder_edgetpu.tflite')    
 
     print(">> configuring camera...")
     camera = VideoStream()
@@ -140,9 +139,6 @@ def main():
 
     print(">> configuring web streamer: http://mpcam.local:8080"),
     http_display = ImageOutput(screen=False)
-
-    print(">> loading model...")
-    model = PoseEngine('models/mobilenet/posenet_mobilenet_v1_075_353_481_quant_decoder_edgetpu.tflite')
     
     print(">> starting processing...")
     try:
