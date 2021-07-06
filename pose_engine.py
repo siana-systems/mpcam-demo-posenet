@@ -16,19 +16,18 @@ from pycoral.utils import edgetpu
 from tflite_runtime.interpreter import load_delegate
 from tflite_runtime.interpreter import Interpreter
 
-import collections
-import enum
-import math
-import time
-
 from PIL import Image
 import numpy as np
 import cv2
 
-verbose = True
+#--->> TUNABLES <<-------------------------------------------------------------
+
+verbose = False
 
 EDGETPU_SHARED_LIB = 'libedgetpu.so.2'
 POSENET_SHARED_LIB = 'posenet_lib/posenet_decoder.so'
+
+#------------------------------------------------------------------------------
 
 KEYPOINTS = (
   'nose',
@@ -86,11 +85,17 @@ class PoseEngine():
         Raises:
           ValueError: An error occurred when model output is invalid.
         """
+        if verbose: print("!! loading edgetpu delegate...")
         edgetpu_delegate = load_delegate(EDGETPU_SHARED_LIB)
+
+        if verbose: print("!! loading posenet delegate...")
         posenet_decoder_delegate = load_delegate(POSENET_SHARED_LIB)
         
+        if verbose: print("!! instanciating interpreter...")
         self._interpreter = Interpreter(model_path,
                                         experimental_delegates=[edgetpu_delegate, posenet_decoder_delegate])
+
+        if verbose: print("!! allocating tensors...")
         self._interpreter.allocate_tensors()
 
         self._mirror = mirror
@@ -109,8 +114,6 @@ class PoseEngine():
         self._input_type = self._interpreter.get_input_details()[0]['dtype']
         if verbose: print("!! model.input type = {}".format(self._input_type))
 
-        self._inf_time = 0
-
     def DetectPosesInImage(self, img):
         """Detects poses in a given image.
 
@@ -122,9 +125,11 @@ class PoseEngine():
           img: numpy array containing image
         """
 
+        # resize image to fit model...
         resized_image = cv2.resize(img, (self._input_width, self._input_height), Image.NEAREST)
         input_data = np.asarray(resized_image)
 
+        # run inference + parser...
         edgetpu.run_inference(self._interpreter, input_data.flatten())
         return self.ParseOutput()
 
@@ -162,4 +167,4 @@ class PoseEngine():
 
             poses.append( Pose(keypoint_dict, pose_score) )
 
-        return poses, self._inf_time
+        return poses

@@ -1,20 +1,41 @@
 #
+# Author: SIANA Systems
+#
 # ref: https://github.com/google-coral/project-posenet
 #
 
-import time
 import platform
 from datetime import datetime
 
 import cv2
 import numpy as np
 
+import tflite_runtime
 from pympcam.coralManager import CoralManager
 from imutils.video import VideoStream, ImageOutput, FPS
 
 from pose_engine import PoseEngine
 
+#--->> TUNABLES <<-------------------------------------------------------------
+
 verbose = False
+
+config_level = 'low'
+
+enable_web_output = True
+
+#------------------------------------------------------------------------------
+
+config = {
+    'low':    [640,480,15,  'models/mobilenet/posenet_mobilenet_v1_075_353_481_quant_decoder_edgetpu.tflite'],
+    'medium': [640,480,15,  'models/mobilenet/posenet_mobilenet_v1_075_481_641_quant_decoder_edgetpu.tflite'],
+    'high':   [1280,720,15, 'models/mobilenet/posenet_mobilenet_v1_075_721_1281_quant_decoder_edgetpu.tflite']
+}
+
+model_file = ''
+camera_width = 0
+camera_height = 0
+camera_fps = 0
 
 # supported pose edges
 EDGES = (
@@ -39,7 +60,20 @@ EDGES = (
     ('right knee', 'right ankle'),
 )
 
+def apply_config(option='low'):
+    '''simple helper to select the proper configuration based on the specified option
+
+      Args:
+         option: either 'low','medium','high'
+    '''      
+    width = config[option][0]
+    height = config[option][1]
+    fps = config[option][2]
+    file = config[option][3]
+    return width,height,fps,file
+
 def draw_pose(poses, src):
+    global config_level, camera_width, camera_height
     '''Draws a stick-figure pose ontop of an input image.
 
       Args:
@@ -47,10 +81,15 @@ def draw_pose(poses, src):
          scr:  input image
     '''
     threshold = 0.2
-    src_size = (640, 480)
-    box_x, box_y, box_w, box_h = 5, 0, 470, 353 #inference_box
 
-    scale_x, scale_y = src_size[0] / box_w, src_size[1] / box_h
+    if config_level == 'low':
+        box_x, box_y, box_w, box_h = 5, 0, 470, 353 #inference_box
+    elif config_level == 'medium':
+        box_x, box_y, box_w, box_h = 5, 0, 630, 481 #inference_box
+    else:
+        box_x, box_y, box_w, box_h = 5, 0, 1270, 721 #inference_box
+
+    scale_x, scale_y = camera_width / box_w, camera_height / box_h
 
     xys = {}
 
@@ -81,7 +120,7 @@ def draw_metrics(src, fps, model_msec=0):
           fps: the Frame-per-second value   
           model_msec: the model compute duration in msec
     '''
-    canvas = np.zeros((20, 640, 3), np.uint8) + 255
+    canvas = np.zeros((20, camera_width, 3), np.uint8) + 255
 
     canvas = cv2.putText(canvas, 
                         'fps: {:.2f}, model: {:.0f} ms'.format(
@@ -104,44 +143,51 @@ def process_frame(img, model):
           img: the input frame
           model: the TF model
     '''
-    
-    #img = cv2.flip(img, 1)
-    #img = cv2.resize(img, (480, 360))
 
-    poses, _ = model.DetectPosesInImage(img)
+    poses = model.DetectPosesInImage(img)
     if verbose: print("!! POSES:\n{}".format(poses))
 
     draw_pose(poses, img)
     return img
 
 def main():
+    global camera_width, camera_height, camera_fps, model_file 
 
     print("\n** MPCam: Coral PoseNet demo **\n")
-    print(">> system info:")
+    print(">> system info:")    
     print("\tpython {}".format(platform.python_version()))
+    print("\ttflite {}".format(tflite_runtime.__version__))
     print("\topencv {}".format(cv2.__version__))
+
+    print(">> configuration = {}".format(config_level))
+    camera_width, camera_height, camera_fps, model_file = apply_config( config_level )
     
     print(">> turning on coral...")
     coral = CoralManager()
     coral.turnOn()
-    time.sleep(2)
 
-    print(">> loading model...")
-    model = PoseEngine('models/mobilenet/posenet_mobilenet_v1_075_353_481_quant_decoder_edgetpu.tflite')    
-
-    print(">> configuring camera...")
+    print(">> configuring camera...")    
     camera = VideoStream()
     cv = camera.stream
-    cv.stream.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
-    cv.stream.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
-    cv.stream.set(cv2.CAP_PROP_FPS, 15)
+    print("\tWidth/Height: {}/{}".format(camera_width, camera_height))
+    cv.stream.set(cv2.CAP_PROP_FRAME_WIDTH, camera_width)
+    cv.stream.set(cv2.CAP_PROP_FRAME_HEIGHT, camera_height)
+    print("\tFPS: {}".format(camera_fps))
+    cv.stream.set(cv2.CAP_PROP_FPS, camera_fps)
     camera.start()
 
-    print(">> configuring web streamer: http://mpcam.local:8080"),
-    http_display = ImageOutput(screen=False)
+    print(">> loading model: {}".format(model_file))
+    model = PoseEngine( model_file )    
+
+    if enable_web_output:
+        print(">> configuring web streamer: http://mpcam.local:8080"),
+        http_display = ImageOutput(screen=False)
+    else:
+        print(">> web streamer is disabled!")
     
     print(">> starting processing...")
     try:
+        last_print = datetime.now()
         # fps/time trackers
         global_fps = FPS().start()
         model_duration = 0
@@ -164,25 +210,29 @@ def main():
             # overlay metrics                
             processed_frame = draw_metrics(processed_frame, report_fps, report_duration)
 
-            # output processed frame
-            http_display.stream('posenet', processed_frame)
+            if enable_web_output:
+                # output processed frame
+                http_display.stream('posenet', processed_frame)
+            
+            # print metrics in console every 5sec
+            if (datetime.now() - last_print).total_seconds() > 5:
+                last_print = datetime.now()
+                print(">> FPS: {:.2f}, Model: {:.0f} ms".format(report_fps, report_duration))                    
 
             # time to update metrics?
             if nframes > 10:
                 # update global fps
                 global_fps.stop()
                 report_fps = global_fps.fps()
-                # update model duration
+                # update averaged model duration
                 report_duration = (model_duration / nframes) * 1000
                 model_duration = nframes = 0
 
-    except KeyboardInterrupt:
-        fps.stop()
+    finally:
         print(">> turn off camera & coral...")
         camera.stop()
         coral.turnOff()
         print(">> done!")
-
 
 if __name__ == '__main__':
     main()
